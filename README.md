@@ -55,7 +55,7 @@ Ce repository contient tous les scripts nécessaires pour déployer automatiquem
 
 ```bash
 # 1. Copier le script
-wget https://raw.githubusercontent.com/[votre-repo]/setup-loadbalancer.sh
+wget https://github.com/OpsCatalog/archi-k8s/setup-loadbalancer.sh
 
 # 2. Éditer les variables si nécessaire
 nano setup-loadbalancer.sh
@@ -507,15 +507,25 @@ Pour toute question ou problème :
 Avant de passer en production, vérifiez :
 
 - [ ] Toutes les IPs sont correctement configurées
+      
 - [ ] Tous les nœuds sont en état "Ready"
+      
 - [ ] WireGuard fonctionne entre tous les nœuds
+      
 - [ ] HAProxy route correctement le trafic
+      
 - [ ] Traefik répond aux requêtes HTTP/HTTPS
+      
 - [ ] Les certificats SSL sont configurés
+      
 - [ ] Les mots de passe par défaut sont changés
+      
 - [ ] Le firewall est correctement configuré
+      
 - [ ] Les sauvegardes etcd sont configurées
+      
 - [ ] Le monitoring est en place
+    
 - [ ] La documentation est à jour
 
 ## 🎉 Félicitations !
