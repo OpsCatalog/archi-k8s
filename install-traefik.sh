@@ -85,24 +85,21 @@ service:
 # Ports configuration
 ports:
   web:
-    port: 80
-    expose: true
-    exposedPort: 80
-    protocol: TCP
-    nodePort: 30080
+    port: 8000
     hostPort: 80
-  websecure:
-    port: 443
-    expose: true
-    exposedPort: 443
+    exposedPort: 80
+    nodePort: 30080
     protocol: TCP
-    nodePort: 30443
+  websecure:
+    port: 8443
     hostPort: 443
+    exposedPort: 443
+    nodePort: 30443
+    protocol: TCP
     tls:
       enabled: true
   traefik:
     port: 9000
-    expose: false
     exposedPort: 9000
     protocol: TCP
 
@@ -206,7 +203,7 @@ echo -e "${GREEN}✓ IngressClass créé${NC}\n"
 # Créer un Middleware pour les redirections HTTPS (optionnel)
 echo -e "${YELLOW}Création du Middleware HTTPS redirect...${NC}"
 cat <<EOF | kubectl apply -f -
-apiVersion: traefik.containo.us/v1alpha1
+apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: redirect-https
