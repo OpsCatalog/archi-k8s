@@ -53,7 +53,7 @@ listen stats
     stats enable
     stats uri /stats
     stats refresh 10s
-    stats auth glitchenkoff:Tito2010@
+    stats auth username:Password
 
 # ═══════════════════════════════════════════════════════════
 # Kubernetes API Server (2 Masters en HA)
@@ -208,6 +208,6 @@ echo "4. Configurer worker01 (10.10.0.4)"
 echo "5. Configurer worker02 (10.10.0.5)"
 echo ""
 
-echo -e "${BLUE}HAProxy Stats : http://164.68.122.34:8404/stats${NC}"
-echo -e "${BLUE}Credentials : glitchenkoff / Tito2010@${NC}"
+echo -e "${BLUE}HAProxy Stats : http://LB_IP:8404/stats${NC}"
+echo -e "${BLUE}Credentials : username / Password${NC}"
 echo ""
