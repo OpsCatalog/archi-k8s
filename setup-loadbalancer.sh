@@ -89,88 +89,6 @@ chmod 600 /etc/wireguard/wg0.conf
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
 sysctl -p
 
-# Configuration de HAProxy
-echo -e "${YELLOW}[5/7] Configuration de HAProxy...${NC}"
-
-# Sauvegarder la configuration originale
-if [ -f /etc/haproxy/haproxy.cfg ]; then
-    cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak
-fi
-
-cat > /etc/haproxy/haproxy.cfg << 'EOF'
-global
-    log /dev/log local0
-    log /dev/log local1 notice
-    chroot /var/lib/haproxy
-    stats socket /run/haproxy/admin.sock mode 660 level admin
-    stats timeout 30s
-    user haproxy
-    group haproxy
-    daemon
-    maxconn 4000
-
-defaults
-    log     global
-    mode    tcp
-    option  tcplog
-    option  dontlognull
-    timeout connect 5000
-    timeout client  50000
-    timeout server  50000
-
-# Stats page
-listen stats
-    bind *:8404
-    mode http
-    stats enable
-    stats uri /stats
-    stats refresh 30s
-    stats auth admin:ChangeMe123!
-
-# Kubernetes API Server
-frontend k8s_api_frontend
-    bind *:6443
-    mode tcp
-    default_backend k8s_api_backend
-
-backend k8s_api_backend
-    mode tcp
-    balance roundrobin
-    option tcp-check
-    tcp-check connect port 6443
-    server master01 10.10.0.2:6443 check inter 2000 fall 3 rise 2
-
-# HTTP Frontend
-frontend http_frontend
-    bind *:80
-    mode http
-    default_backend http_backend
-
-backend http_backend
-    mode http
-    balance roundrobin
-    option httpchk GET /
-    http-check expect status 200-499
-    server worker01 10.10.0.3:80 check
-    server worker02 10.10.0.4:80 check
-
-# HTTPS Frontend
-frontend https_frontend
-    bind *:443
-    mode tcp
-    default_backend https_backend
-
-backend https_backend
-    mode tcp
-    balance roundrobin
-    option tcp-check
-    server worker01 10.10.0.3:443 check
-    server worker02 10.10.0.4:443 check
-EOF
-
-# Tester la configuration HAProxy
-haproxy -c -f /etc/haproxy/haproxy.cfg
-
 # Configuration du Firewall
 echo -e "${YELLOW}[6/7] Configuration du firewall...${NC}"
 
@@ -203,17 +121,12 @@ echo -e "${YELLOW}[7/7] Démarrage des services...${NC}"
 systemctl enable wg-quick@wg0
 systemctl start wg-quick@wg0
 
-# Démarrer HAProxy
-systemctl enable haproxy
-systemctl restart haproxy
-
 # Vérification finale
 echo -e "\n${GREEN}========================================${NC}"
 echo -e "${GREEN}Configuration terminée !${NC}"
 echo -e "${GREEN}========================================${NC}\n"
 
 echo -e "${GREEN}✓ WireGuard installé et démarré${NC}"
-echo -e "${GREEN}✓ HAProxy installé et démarré${NC}"
 echo -e "${GREEN}✓ Firewall configuré${NC}\n"
 
 # Afficher les informations importantes
@@ -227,7 +140,6 @@ echo -e "Port WireGuard: ${GREEN}${WG_PORT}${NC}\n"
 echo -e "Clé publique du serveur:"
 echo -e "${YELLOW}${SERVER_PUBLIC_KEY}${NC}\n"
 
-echo -e "HAProxy Stats: ${GREEN}http://${PUBLIC_IP}:8404/stats${NC}"
 echo -e "Credentials: ${YELLOW}admin/ChangeMe123!${NC}\n"
 
 # Afficher le statut des services
@@ -236,7 +148,6 @@ echo -e "═══════════════════════�
 
 systemctl status wg-quick@wg0 --no-pager | head -n 5
 echo ""
-systemctl status haproxy --no-pager | head -n 5
 
 echo -e "\n${YELLOW}État WireGuard:${NC}"
 wg show
