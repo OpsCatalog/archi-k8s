@@ -123,14 +123,14 @@ sudo netstat -tlnp | grep haproxy
 
 ```bash
 # 1. Copier le script
-scp setup-rke2-node.sh root@master01:/root/
+scp setup-rke2-master.sh root@master01:/root/
 
 # 2. Se connecter
 ssh root@master01
 
 # 3. Lancer l'installation
-chmod +x setup-rke2-node.sh
-./setup-rke2-node.sh master 10.10.0.2 10.10.0.1
+chmod +x setup-rke2-master.sh
+./setup-rke2-master.sh master 10.10.0.2 10.10.0.1
 
 # 4. Suivre les instructions :
 #    - Entrer la clé publique du Load Balancer
@@ -205,7 +205,7 @@ nc -zv 10.10.0.2 6443
 
 ```bash
 # 1. Copier le script
-scp setup-rke2-node.sh root@master02:/root/
+scp setup-rke2-master.sh root@master02:/root/
 
 # 2. Se connecter
 ssh root@master02
@@ -338,8 +338,8 @@ kubectl get pods -n kube-system | grep etcd
 scp setup-rke2-node.sh root@worker01:/root/
 ssh root@worker01
 
-chmod +x setup-rke2-node.sh
-./setup-rke2-node.sh worker 10.10.0.4 10.10.0.1
+chmod +x setup-rke2-worker.sh
+./setup-rke2-worker.sh
 
 # Entrer :
 # - Clé publique du Load Balancer
@@ -360,8 +360,8 @@ sudo add-wireguard-peer.sh worker01 10.10.0.4
 scp setup-rke2-node.sh root@worker02:/root/
 ssh root@worker02
 
-chmod +x setup-rke2-node.sh
-./setup-rke2-node.sh worker 10.10.0.5 10.10.0.1
+chmod +x setup-rke2-worker.sh
+./setup-rke2-worker.sh
 
 # Même processus que worker01
 ```
