@@ -15,28 +15,6 @@ Ce repository contient tous les scripts nécessaires pour déployer automatiquem
 └── verify-infrastructure.sh            # Vérification de l'installation
 ```
 
-## 🎯 Architecture
-
-```
-                        🌍 Internet
-                             │
-                             ▼
-┌──────────────────────────────────────────────┐
-│ VPS Load Balancer (185.x.x.x)                │
-│  • WireGuard Server (10.10.0.1)              │
-│  • HAProxy (HTTP/HTTPS/K8s API)              │
-└──────────────────────────────────────────────┘
-         │
-         │ WireGuard VPN (10.10.0.0/24)
-         ▼
-─────────────────────────────────────────────────
-| 10.10.0.2 → master01 (RKE2 Server)            |
-| 10.10.0.3 → worker01 (RKE2 Agent)             |
-| 10.10.0.4 → worker02 (RKE2 Agent)             |
-| 10.10.0.10 → infra-node (GitLab, MinIO...)    |
-─────────────────────────────────────────────────
-```
-
 ## 📋 Prérequis
 
 - **OS**: Ubuntu 20.04/22.04/24.04 ou Debian 11/12
@@ -75,7 +53,71 @@ sudo ./setup-loadbalancer.sh
 - ✓ Clé publique du serveur notée
 - ✓ Firewall configuré
 
-### Étape 2️⃣ : Configuration du Master RKE2
+## 📐 Architecture HA
+
+```
+                        🌍 Internet (185.x.x.x)
+                               │
+                    ┌──────────┴──────────┐
+                    │  Load Balancer (LB) │
+                    │  • HAProxy           │
+                    │  • WireGuard         │
+                    │  • 10.10.0.1         │
+                    └──────────┬──────────┘
+                               │
+           ┌───────────────────┼───────────────────┐
+           │                   │                   │
+    ┌──────▼──────┐     ┌──────▼──────┐    ┌──────▼──────┐
+    │  master01   │     │  master02   │    │  worker01   │
+    │  10.10.0.2  │◄────┤  10.10.0.3  │    │  10.10.0.4  │
+    │  RKE2 HA    │etcd │  RKE2 HA    │    │  RKE2 Agent │
+    └─────────────┘     └─────────────┘    └─────────────┘
+                                                   │
+                                            ┌──────▼──────┐
+                                            │  worker02   │
+                                            │  10.10.0.5  │
+                                            │  RKE2 Agent │
+                                            └─────────────┘
+```
+
+## 🔑 Avantages de la Configuration HA
+
+✅ **Haute disponibilité du Control Plane** - Si un master tombe, l'autre prend le relai
+✅ **etcd distribué** - Base de données Kubernetes répliquée sur 2 nœuds
+✅ **Load balancing automatique** - HAProxy distribue le trafic entre les masters
+✅ **Zero downtime** - Maintenance possible sans interruption de service
+
+## 📋 Plan d'Adressage
+
+| Serveur | IP WireGuard | Rôle | Services |
+|---------|-------------|------|----------|
+| loadbalancer | 10.10.0.1 | Load Balancer | HAProxy, WireGuard |
+| master01 | 10.10.0.2 | Master HA #1 | RKE2 Server, etcd |
+| master02 | 10.10.0.3 | Master HA #2 | RKE2 Server, etcd |
+| worker01 | 10.10.0.4 | Worker | RKE2 Agent, Ingress |
+| worker02 | 10.10.0.5 | Worker | RKE2 Agent, Ingress |
+
+### ⚡ Étape 0 : Configurer HAProxy pour 2 Masters
+
+**Sur le Load Balancer :**
+
+```bash
+# Appliquer la configuration HAProxy
+chmod +x configure-haproxy-ha.sh
+sudo ./configure-haproxy-ha.sh
+
+# Vérifier que HAProxy est bien configuré
+sudo systemctl status haproxy
+
+# Vérifier les ports
+sudo netstat -tlnp | grep haproxy
+```
+
+**✅ Vous devez voir les ports : 80, 443, 6443, 8404, 9345**
+
+---
+
+### 1️⃣ Étape 1 : Configuration du PREMIER Master (master01)
 
 **Sur master01 (qui deviendra 10.10.0.2) :**
 
@@ -83,98 +125,457 @@ sudo ./setup-loadbalancer.sh
 # 1. Copier le script
 scp setup-rke2-node.sh root@master01:/root/
 
-# 2. Se connecter au master
+# 2. Se connecter
 ssh root@master01
 
-# 3. Éditer le script si nécessaire
-nano setup-rke2-node.sh
-# Vérifier : LB_PUBLIC_IP="185.x.x.x"
-
-# 4. Lancer l'installation
+# 3. Lancer l'installation
 chmod +x setup-rke2-node.sh
 ./setup-rke2-node.sh master 10.10.0.2 10.10.0.1
 
-# 5. Suivre les instructions :
+# 4. Suivre les instructions :
 #    - Entrer la clé publique du Load Balancer
 #    - Générer un nouveau token (répondre 'y')
-#    - NOTER LE TOKEN affiché (pour les workers)
+#    - IMPORTANT : NOTER LE TOKEN (nécessaire pour master02 ET les workers)
 ```
 
-**⏱️ Temps d'installation : ~5 minutes**
+**⏱️ Temps : ~5 minutes**
 
-**✅ À la fin de cette étape :**
-- ✓ WireGuard connecté (ping 10.10.0.1 fonctionne)
-- ✓ RKE2 Server actif
-- ✓ Token RKE2 généré et noté
-- ✓ kubectl fonctionnel
-- ✓ Master en état "Ready"
+**Configuration appliquée sur master01 :**
+```yaml
+# /etc/rancher/rke2/config.yaml
+node-ip: 10.10.0.2
+advertise-address: 10.10.0.2
+tls-san:
+  - 185.x.x.x
+  - 10.10.0.1
+  - 10.10.0.2
+  - 10.10.0.3
+  - master01
+  - master02
+token: "VotreTokenSecurise123456789"
+cluster-cidr: 10.42.0.0/16
+service-cidr: 10.43.0.0/16
+cni:
+  - calico
+```
 
-### Étape 3️⃣ : Ajouter le peer Master sur le Load Balancer
+**Vérifier que master01 est prêt :**
+
+```bash
+# Sur master01
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+export PATH=$PATH:/var/lib/rancher/rke2/bin
+
+# Attendre que le nœud soit Ready (peut prendre 2-3 minutes)
+kubectl get nodes
+
+# Devrait afficher :
+# NAME       STATUS   ROLES                       AGE   VERSION
+# master01   Ready    control-plane,etcd,master   3m    v1.28.x+rke2r1
+```
+
+---
+
+### 2️⃣ Étape 2 : Ajouter le Peer master01 sur le Load Balancer
 
 **Retour sur le Load Balancer :**
 
 ```bash
-# 1. Utiliser le script helper
+# Ajouter master01 au réseau WireGuard
 sudo add-wireguard-peer.sh master01 10.10.0.2
 
-# 2. Entrer la clé publique du master01
-#    (affichée lors de l'installation du master)
+# Entrer la clé publique de master01 (affichée lors de son installation)
 
-# 3. Vérifier la connexion
-wg show
+# Vérifier la connectivité
 ping 10.10.0.2
+
+# Tester l'API Kubernetes
+nc -zv 10.10.0.2 6443
 ```
 
-**✅ Vérification :** `ping 10.10.0.2` doit fonctionner
+**✅ Les deux commandes doivent réussir**
 
-### Étape 4️⃣ : Configuration des Workers
+---
 
-**Sur worker01 (qui deviendra 10.10.0.3) :**
+### 3️⃣ Étape 3 : Configuration du SECOND Master (master02)
+
+**⚠️ IMPORTANT : Attendre que master01 soit complètement opérationnel avant de continuer !**
+
+**Sur master02 (qui deviendra 10.10.0.3) :**
 
 ```bash
 # 1. Copier le script
-scp setup-rke2-node.sh root@worker01:/root/
+scp setup-rke2-node.sh root@master02:/root/
 
 # 2. Se connecter
-ssh root@worker01
+ssh root@master02
 
-# 3. Lancer l'installation
-chmod +x setup-rke2-node.sh
-./setup-rke2-node.sh worker 10.10.0.3 10.10.0.1
+# 3. Créer la configuration WireGuard MANUELLEMENT d'abord
+apt update && apt install -y wireguard wireguard-tools
 
-# 4. Suivre les instructions :
-#    - Entrer la clé publique du Load Balancer
-#    - Entrer le TOKEN RKE2 du master
-#    - Confirmer l'IP du master (10.10.0.2)
+# Générer les clés
+wg genkey | tee /etc/wireguard/private.key | wg pubkey > /etc/wireguard/public.key
+chmod 600 /etc/wireguard/private.key
+
+# Noter la clé publique
+cat /etc/wireguard/public.key
+
+# Créer la config WireGuard
+cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+PrivateKey = $(cat /etc/wireguard/private.key)
+Address = 10.10.0.3/24
+
+[Peer]
+PublicKey = <CLÉ_PUBLIQUE_DU_LOAD_BALANCER>
+Endpoint = 185.x.x.x:51820
+AllowedIPs = 10.10.0.0/24
+PersistentKeepalive = 25
+EOF
+
+# Démarrer WireGuard
+systemctl enable wg-quick@wg0
+systemctl start wg-quick@wg0
+
+# Vérifier la connectivité
+ping 10.10.0.1
+ping 10.10.0.2
 ```
 
-**Sur worker02 (qui deviendra 10.10.0.4) :**
-
-```bash
-# Même procédure
-./setup-rke2-node.sh worker 10.10.0.4 10.10.0.1
-```
-
-**⏱️ Temps par worker : ~3 minutes**
-
-### Étape 5️⃣ : Ajouter les peers Workers sur le Load Balancer
+**4. Ajouter master02 au Load Balancer**
 
 **Sur le Load Balancer :**
 
 ```bash
-# Ajouter worker01
-sudo add-wireguard-peer.sh worker01 10.10.0.3
-# Entrer sa clé publique
+sudo add-wireguard-peer.sh master02 10.10.0.3
+# Entrer la clé publique de master02
+```
 
-# Ajouter worker02
-sudo add-wireguard-peer.sh worker02 10.10.0.4
-# Entrer sa clé publique
+**5. Installer RKE2 sur master02 (rejoint le cluster)**
+
+**Sur master02 :**
+
+```bash
+# Télécharger RKE2 Server
+curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE=server sh -
+
+# Créer la configuration - IMPORTANT: il rejoint master01
+mkdir -p /etc/rancher/rke2
+
+cat > /etc/rancher/rke2/config.yaml << EOF
+# Rejoindre le cluster existant via le Load Balancer
+server: https://10.10.0.1:9345
+
+# LE MÊME TOKEN que master01
+token: "VotreTokenSecurise123456789"
+
+# Configuration du nœud
+node-ip: 10.10.0.3
+advertise-address: 10.10.0.3
+
+# TLS SANs
+tls-san:
+  - 185.x.x.x
+  - 10.10.0.1
+  - 10.10.0.2
+  - 10.10.0.3
+  - master01
+  - master02
+
+# Configuration réseau (doit être identique à master01)
+cluster-cidr: 10.42.0.0/16
+service-cidr: 10.43.0.0/16
+
+# CNI
+cni:
+  - calico
+
+# Désactiver l'ingress par défaut
+disable:
+  - rke2-ingress-nginx
+
+# Permissions
+write-kubeconfig-mode: "0644"
+EOF
+
+# Démarrer RKE2 Server
+systemctl enable rke2-server.service
+systemctl start rke2-server.service
+
+# Suivre les logs (peut prendre 3-5 minutes pour rejoindre le cluster)
+journalctl -u rke2-server -f
+```
+
+**6. Vérifier que master02 a rejoint le cluster**
+
+**Sur master01 ou master02 :**
+
+```bash
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+export PATH=$PATH:/var/lib/rancher/rke2/bin
+
+kubectl get nodes
+
+# Devrait maintenant afficher LES DEUX masters :
+# NAME       STATUS   ROLES                       AGE   VERSION
+# master01   Ready    control-plane,etcd,master   10m   v1.28.x+rke2r1
+# master02   Ready    control-plane,etcd,master   3m    v1.28.x+rke2r1
+
+# Vérifier etcd (doit avoir 2 membres)
+kubectl get nodes -o wide
+kubectl get pods -n kube-system | grep etcd
+```
+
+**✅ Vous avez maintenant un Control Plane HA avec etcd distribué !**
+
+---
+
+### 4️⃣ Étape 4 : Configuration des Workers
+
+**Sur worker01 (10.10.0.4) :**
+
+```bash
+scp setup-rke2-node.sh root@worker01:/root/
+ssh root@worker01
+
+chmod +x setup-rke2-node.sh
+./setup-rke2-node.sh worker 10.10.0.4 10.10.0.1
+
+# Entrer :
+# - Clé publique du Load Balancer
+# - LE MÊME TOKEN que les masters
+# - IP du serveur : 10.10.0.1 (le Load Balancer - pas un master directement!)
+```
+
+**Ajouter le peer sur le Load Balancer :**
+
+```bash
+# Sur le LB
+sudo add-wireguard-peer.sh worker01 10.10.0.4
+```
+
+**Sur worker02 (10.10.0.5) :**
+
+```bash
+scp setup-rke2-node.sh root@worker02:/root/
+ssh root@worker02
+
+chmod +x setup-rke2-node.sh
+./setup-rke2-node.sh worker 10.10.0.5 10.10.0.1
+
+# Même processus que worker01
+```
+
+**Ajouter le peer sur le Load Balancer :**
+
+```bash
+# Sur le LB
+sudo add-wireguard-peer.sh worker02 10.10.0.5
+```
+
+**⚠️ IMPORTANT pour les workers :**
+Les workers se connectent via le Load Balancer (`10.10.0.1:9345`), pas directement aux masters. HAProxy distribue automatiquement entre master01 et master02.
+
+---
+
+### 5️⃣ Étape 5 : Vérification Complète
+
+**Sur master01 :**
+
+```bash
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+export PATH=$PATH:/var/lib/rancher/rke2/bin
+
+# Tous les nœuds doivent être Ready
+kubectl get nodes -o wide
+
+# Résultat attendu :
+# NAME       STATUS   ROLES                       AGE   VERSION        INTERNAL-IP
+# master01   Ready    control-plane,etcd,master   15m   v1.28.x+rke2   10.10.0.2
+# master02   Ready    control-plane,etcd,master   8m    v1.28.x+rke2   10.10.0.3
+# worker01   Ready    worker                      5m    v1.28.x+rke2   10.10.0.4
+# worker02   Ready    worker                      3m    v1.28.x+rke2   10.10.0.5
+
+# Vérifier les pods système
+kubectl get pods -A
+
+# Vérifier etcd HA
+kubectl get pods -n kube-system | grep etcd
+# Doit montrer etcd sur master01 ET master02
+
+# Vérifier les endpoints de l'API
+kubectl get endpoints kubernetes -n default
+# Doit montrer master01:6443 ET master02:6443
+```
+
+**Sur le Load Balancer :**
+
+```bash
+# Vérifier HAProxy Stats
+curl http://localhost:8404/stats
+
+# Ou dans un navigateur :
+# http://185.x.x.x:8404/stats
+# admin / ChangeMe123!
+
+# Vérifier que les 2 masters sont UP
+```
+
+---
+
+### 6️⃣ Étape 6 : Installation de Traefik
+
+**Sur master01 :**
+
+```bash
+chmod +x install-traefik.sh
+./install-traefik.sh
 
 # Vérifier
-wg show
-ping 10.10.0.3
-ping 10.10.0.4
+kubectl get pods -n traefik
+kubectl get svc -n traefik
+kubectl get pods -n test-app
 ```
+
+---
+
+### 7️⃣ Étape 7 : Test de Haute Disponibilité
+
+**Test 1 : Arrêter master01**
+
+```bash
+# Sur master01
+sudo systemctl stop rke2-server
+
+# Sur master02 (ou worker)
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+export PATH=$PATH:/var/lib/rancher/rke2/bin
+
+kubectl get nodes
+# L'API Kubernetes doit TOUJOURS fonctionner via master02
+
+# Sur le Load Balancer, vérifier les logs HAProxy
+journalctl -u haproxy -f
+# Doit montrer que master01 est DOWN et le trafic va vers master02
+```
+
+**Test 2 : Redémarrer master01**
+
+```bash
+# Sur master01
+sudo systemctl start rke2-server
+
+# Attendre 2 minutes
+
+# Vérifier qu'il rejoint le cluster
+kubectl get nodes
+# master01 doit revenir en Ready
+
+# HAProxy doit automatiquement re-distribuer le trafic
+```
+
+---
+
+## 🎯 Configuration Spéciale pour Workers
+
+Les workers doivent se connecter via le Load Balancer, pas directement aux masters.
+
+**Configuration worker (/etc/rancher/rke2/config.yaml) :**
+
+```yaml
+# SE CONNECTE VIA LE LOAD BALANCER
+server: https://10.10.0.1:9345
+
+# Token partagé
+token: "VotreTokenSecurise123456789"
+
+# IP du worker
+node-ip: 10.10.0.4  # ou 10.10.0.5 pour worker02
+
+# Labels
+node-label:
+  - "node-role.kubernetes.io/worker=true"
+  - "workload=application"
+```
+
+**Pourquoi via le Load Balancer ?**
+- ✅ Haute disponibilité automatique
+- ✅ Si un master tombe, les workers continuent via l'autre
+- ✅ Load balancing automatique du trafic d'enregistrement
+
+---
+
+## 🔍 Commandes de Diagnostic HA
+
+```bash
+# Vérifier l'état des masters
+kubectl get nodes -l node-role.kubernetes.io/master
+
+# Vérifier etcd sur les deux masters
+kubectl get pods -n kube-system -o wide | grep etcd
+
+# Voir les membres etcd
+kubectl exec -n kube-system etcd-master01 -- etcdctl member list
+
+# Vérifier les endpoints Kubernetes API
+kubectl get endpoints kubernetes -n default
+
+# HAProxy : voir les backends actifs
+echo "show stat" | socat stdio /run/haproxy/admin.sock | grep k8s_api_backend
+
+# Tester l'API via le Load Balancer
+curl -k https://10.10.0.1:6443/healthz
+```
+
+---
+
+## 🛡️ Avantages de cette Configuration
+
+1. **Tolérance aux pannes** : Un master peut tomber sans interruption
+2. **Maintenance sans downtime** : Mise à jour des masters l'un après l'autre
+3. **Performance** : Charge distribuée entre les masters
+4. **Évolutivité** : Facile d'ajouter un 3ème master si nécessaire
+5. **Production-ready** : Configuration recommandée par Rancher
+
+---
+
+## 📊 Résumé de l'Architecture
+
+```
+Réseau WireGuard : 10.10.0.0/24
+├─ 10.10.0.1 : Load Balancer (HAProxy)
+│  ├─ Port 6443  → master01 + master02 (K8s API)
+│  ├─ Port 9345  → master01 + master02 (RKE2 Registration)
+│  ├─ Port 80    → worker01 + worker02 (HTTP)
+│  └─ Port 443   → worker01 + worker02 (HTTPS)
+│
+├─ 10.10.0.2 : master01 (RKE2 Server + etcd)
+├─ 10.10.0.3 : master02 (RKE2 Server + etcd)
+├─ 10.10.0.4 : worker01 (RKE2 Agent + Ingress)
+└─ 10.10.0.5 : worker02 (RKE2 Agent + Ingress)
+```
+
+---
+
+## ✅ Checklist Finale
+
+- [ ] Load Balancer : HAProxy configuré pour 2 masters
+- [ ] Load Balancer : WireGuard actif
+- [ ] master01 : RKE2 Server installé et Ready
+- [ ] master01 : Peer ajouté sur le LB
+- [ ] master02 : RKE2 Server installé et Ready (rejoint master01)
+- [ ] master02 : Peer ajouté sur le LB
+- [ ] etcd : 2 membres actifs
+- [ ] worker01 : RKE2 Agent installé et Ready
+- [ ] worker01 : Peer ajouté sur le LB
+- [ ] worker02 : RKE2 Agent installé et Ready
+- [ ] worker02 : Peer ajouté sur le LB
+- [ ] Traefik : Installé et fonctionnel
+- [ ] Test HA : Arrêt/redémarrage d'un master sans impact
+- [ ] HAProxy Stats : Les 2 masters sont UP
+
+Vous avez maintenant un cluster Kubernetes **production-ready** avec haute disponibilité ! 🎉🚀
+
 
 ### Étape 6️⃣ : Vérifier le Cluster
 
@@ -232,7 +633,7 @@ curl -H "Host: whoami.local" http://localhost
 **Depuis Internet :**
 
 ```bash
-# Tester via l'IP publique
+# Tester via l'IP publique du LoadBalancer
 curl -H "Host: whoami.local" http://185.x.x.x
 ```
 
