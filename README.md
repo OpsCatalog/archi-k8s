@@ -132,7 +132,7 @@ ssh root@master01
 
 # 3. Lancer l'installation
 chmod +x setup-rke2-master.sh
-./setup-rke2-master.sh master 10.10.0.2 10.10.0.1
+./setup-rke2-master.sh master 10.10.0.2(ip master01) 10.10.0.1(ip loadbalancer)
 
 # 4. Suivre les instructions :
 #    - Entrer la clé publique du Load Balancer
@@ -242,6 +242,10 @@ systemctl start wg-quick@wg0
 # Vérifier la connectivité
 ping 10.10.0.1
 ping 10.10.0.2
+
+# 4. Lancer l'installation
+chmod +x setup-rke2-master.sh
+./setup-rke2-master.sh master 10.10.0.3(ip master02) 10.10.0.1(ip loadbalancer)
 ```
 
 **4. Ajouter master02 au Load Balancer**
@@ -493,11 +497,6 @@ token: "VotreTokenSecurise123456789"
 
 # IP du worker
 node-ip: 10.10.0.4  # ou 10.10.0.5 pour worker02
-
-# Labels
-node-label:
-  - "node-role.kubernetes.io/worker=true"
-  - "workload=application"
 ```
 
 **Pourquoi via le Load Balancer ?**
