@@ -51,7 +51,6 @@ sudo ./setup-loadbalancer.sh
 
 **✅ À la fin de cette étape, vous devez avoir :**
 - ✓ WireGuard actif sur le Load Balancer
-- ✓ HAProxy configuré
 - ✓ Clé publique du serveur notée
 - ✓ Firewall configuré
 
