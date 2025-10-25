@@ -9,7 +9,9 @@ Ce repository contient tous les scripts nécessaires pour déployer automatiquem
 ├── README.md                           # Ce fichier
 ├── guide-rke2-wireguard-deployment.md  # Guide complet détaillé
 ├── setup-loadbalancer.sh               # Configuration du Load Balancer
-├── setup-rke2-node.sh                  # Installation RKE2 (master/worker)
+├── configure-haproxy-ha.sh             # Configuration de haproxy
+├── setup-rke2-master.sh                  # Installation RKE2 (master)
+├── setup-rke2-worker.sh                  # Installation RKE2 (worker)
 ├── generate-wireguard-client.sh        # Génération config WireGuard
 ├── install-traefik.sh                  # Installation Traefik Ingress
 └── verify-infrastructure.sh            # Vérification de l'installation
