@@ -71,6 +71,39 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
+# Étape 1: Mise à jour du système
+echo -e "${YELLOW}[1/8] Mise à jour du système...${NC}"
+apt update && apt upgrade -y
+
+# Étape 2: Installation des prérequis
+echo -e "${YELLOW}[2/8] Installation des prérequis...${NC}"
+apt install -y curl wget wireguard wireguard-tools net-tools
+
+# Étape 3: Configuration système pour Kubernetes
+echo -e "${YELLOW}[3/8] Configuration système pour Kubernetes...${NC}"
+
+# Désactiver le swap
+swapoff -a
+sed -i '/ swap / s/^/#/' /etc/fstab
+
+# Charger les modules kernel
+cat > /etc/modules-load.d/k8s.conf << EOF
+overlay
+br_netfilter
+EOF
+
+modprobe overlay
+modprobe br_netfilter
+
+# Configuration sysctl
+cat > /etc/sysctl.d/k8s.conf << EOF
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+sysctl --system
+
 echo -e "${YELLOW}Configuration de WireGuard...${NC}"
 
 mkdir -p /etc/wireguard
