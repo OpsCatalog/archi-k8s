@@ -71,6 +71,66 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
+echo -e "${YELLOW}Configuration de WireGuard...${NC}"
+
+mkdir -p /etc/wireguard
+cd /etc/wireguard
+
+# Générer les clés si elles n'existent pas
+if [ ! -f private.key ]; then
+    wg genkey | tee private.key | wg pubkey > public.key
+    chmod 600 private.key
+    echo -e "${GREEN}✓ Clés WireGuard générées${NC}"
+else
+    echo -e "${YELLOW}⚠ Clés WireGuard déjà existantes${NC}"
+fi
+
+PRIVATE_KEY=$(cat private.key)
+PUBLIC_KEY=$(cat public.key)
+
+echo -e "\n${GREEN}Clé publique de ce nœud (à ajouter sur le load balancer):${NC}"
+echo -e "${YELLOW}${PUBLIC_KEY}${NC}\n"
+
+# Demander la clé publique du serveur
+echo -e "${YELLOW}Entrez la clé publique du serveur Load Balancer:${NC}"
+read SERVER_PUBLIC_KEY
+
+if [ -z "$SERVER_PUBLIC_KEY" ]; then
+    echo -e "${RED}Erreur: clé publique du serveur vide${NC}"
+    exit 1
+fi
+
+# Créer la configuration WireGuard
+cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+PrivateKey = ${PRIVATE_KEY}
+Address = ${WORKER_IP}/24
+
+[Peer]
+PublicKey = ${SERVER_PUBLIC_KEY}
+Endpoint = ${LB_PUBLIC_IP}:${WG_PORT}
+AllowedIPs = 10.10.0.0/24
+PersistentKeepalive = 25
+EOF
+
+chmod 600 /etc/wireguard/wg0.conf
+
+# Démarrer WireGuard
+systemctl enable wg-quick@wg0
+systemctl start wg-quick@wg0
+
+sleep 3
+
+# Test de connectivité
+echo -e "\n${YELLOW}Test de connectivité vers le serveur...${NC}"
+if ping -c 3 ${SERVER_IP} > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Connectivité VPN OK${NC}\n"
+else
+    echo -e "${RED}✗ Échec de la connectivité VPN${NC}"
+    echo -e "${YELLOW}Vérifiez que le peer est ajouté sur le serveur${NC}\n"
+    exit 1
+fi
+
 # Vérifier WireGuard
 echo -e "\n${YELLOW}Vérification de WireGuard...${NC}"
 if systemctl is-active --quiet wg-quick@wg0; then
